@@ -1,0 +1,38 @@
+[project]
+name = "cyaudit"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pygithub>=2.5.0",
+]
+
+[tool.uv]
+dev-dependencies = ["mypy>=1.14.1"]
+
+
+[project.scripts]
+"cyaudit" = "cyaudit:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["cyaudit"]
+
+
+[tool.mypy]
+disable_error_code = 'type-arg, attr-defined'
+ignore_missing_imports = true
+exclude = [
+    'tests/',            # Excludes all files in the tests directory
+    '(^|/)test_.*\.py$', # Excludes files that start with test_
+]
+
+[tool.ruff.format]
+skip-magic-trailing-comma = true
