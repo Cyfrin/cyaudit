@@ -5,12 +5,14 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "gql>=3.5.0",
     "pygithub>=2.5.0",
+    "requests-toolbelt>=1.0.0",
+    "tomli-w>=1.2.0",
 ]
 
 [tool.uv]
-dev-dependencies = ["mypy>=1.14.1"]
-
+dev-dependencies = ["mypy>=1.14.1", "pytest>=8.3.4", "python-dotenv>=1.0.1"]
 
 [project.scripts]
 "cyaudit" = "cyaudit:main"
@@ -24,7 +26,9 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["cyaudit"]
-
+include = [
+    "/cyaudit/templates/**/*", # Include template files
+]
 
 [tool.mypy]
 disable_error_code = 'type-arg, attr-defined'

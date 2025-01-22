@@ -1,59 +1,408 @@
-from argparse import Namespace
-from typing import Tuple, List
-from urllib.parse import urlparse
-import tempfile
-from github import Github, Repository, Organization, GithubException
+import os
+import shutil
 import subprocess
-from cyaudit.logging import logger
+import tempfile
+import tomllib
+from argparse import Namespace
+from datetime import date
+from getpass import getpass
+from importlib import resources
+from pathlib import Path
+from typing import List, Tuple
+from urllib.parse import urlparse
 
-MAIN_BRANCH_NAME = "main"
+import tomli_w
+from github import Github, GithubException, Organization, Repository
+
+from cyaudit.github_project_utils import clone_project
+from cyaudit.constants import (
+    DEFAULT_LABELS,
+    GITHUB_WORKFLOW_ACTION_NAME,
+    ISSUE_TEMPLATE,
+    MAIN_BRANCH_NAME,
+    REPORT_BRANCH_NAME,
+    REPORT_FOLDER,
+    SEVERITY_DATA,
+    PROJECT_TEMPLATE_ID,
+)
+from cyaudit.create_action import create_action
+from cyaudit.logging import logger
 
 
 def main(args: Namespace) -> int:
-    (source_url, target_repo_name, target_organization, auditors) = prompt_for_missing(
-        args
+    (
+        source_url,
+        target_repo_name,
+        target_organization,
+        auditors,
+        commit_hash,
+        personal_github_token,
+        org_github_token,
+        project_title,
+    ) = prompt_for_missing(args)
+    setup_repo(
+        source_url,
+        target_repo_name,
+        target_organization,
+        auditors,
+        commit_hash,
+        personal_github_token,
+        org_github_token,
+        project_title,
     )
-    setup_repo(source_url, target_repo_name, target_organization, auditors)
     return 0
 
 
-# TODO: Finish this repo, and run some integration tests on it with setup and tear down
-# of git repos on a brand new test org.
 def setup_repo(
     source_url: str,
     target_repo_name: str,
     target_organization: str,
     auditors: List[str],
+    commit_hash: str,
+    personal_github_token: str,
+    org_github_token: str | None = None,
+    project_title: str = "DEFAULT PROJECT",
 ) -> None:
+    if not source_url or not auditors or not target_organization:
+        raise ValueError(
+            "Missing required parameters. Please provide:\n"
+            "- Source URL\n"
+            "- Commit hash\n"
+            "- Organization\n"
+            "- Auditors\n"
+            "Either through environment variables or command options."
+        )
+
+    if not personal_github_token:
+        personal_github_token = os.getenv("CYAUDIT_PERSONAL_GITHUB_TOKEN")
+        raise ValueError(
+            "At least a classic GitHub token is required, but ideally two fine-grained tokens. Please provide it through:\n"
+            "- Environment variable CYAUDIT_PERSONAL_GITHUB_TOKEN"
+        )
+
     clean_url = source_url.replace(".git", "")
     parsed = urlparse(clean_url)
     path_parts = parsed.path.strip("/").split("/")
     source_username = path_parts[-2]
     source_repo_name = path_parts[-1]
 
+    repo = None
+
     with tempfile.TemporaryDirectory() as temp_dir:
         repo = try_clone_repo(
-            github_token,
             target_organization,
             target_repo_name,
             source_repo_name,
             source_username,
             temp_dir,
             commit_hash,
+            personal_github_token,
+            org_github_token,
         )
+        repo = create_audit_tag(repo, temp_dir, commit_hash)
+        repo = add_issue_template_to_repo(repo)
+        repo = replace_labels_in_repo(repo)
+        repo = create_branches_for_auditors(repo, auditors, commit_hash)
+        repo = create_report_branch(repo, commit_hash)
+        repo = add_report_branch_data(
+            repo,
+            source_repo_name,
+            target_repo_name,
+            source_username,
+            target_organization,
+            temp_dir,
+            commit_hash,
+        )
+        repo = set_up_ci(repo, temp_dir)
+        set_up_project_board(
+            repo,
+            personal_github_token,
+            org_github_token,
+            target_organization,
+            target_repo_name,
+            PROJECT_TEMPLATE_ID,
+            project_title,
+        )
+
+    return repo
+
+
+# IMPORTANT: project creation via REST API is not supported anymore
+# https://stackoverflow.com/questions/73268885/unable-to-create-project-in-repository-or-organisation-using-github-rest-api
+# we use a non-standard way to access GitHub's GraphQL
+def set_up_project_board(
+    repo: Repository,
+    github_token: str,
+    organization: str,
+    target_repo_name: str,
+    project_template_id: str,
+    project_title: str = "DEFAULT PROJECT",
+):
+    if not project_title:
+        project_title = "DEFAULT PROJECT"
+    try:
+        clone_project(
+            repo,
+            github_token,
+            organization,
+            target_repo_name,
+            project_template_id,
+            project_title,
+        )
+        print("Project board has been set up successfully!")
+    except Exception as e:
+        print(f"Error occurred while setting up project board: {str(e)}")
+        print("Please set up project board manually.")
+    return
+
+
+def set_up_ci(repo, dir: str):
+    try:
+        create_action(
+            repo,
+            GITHUB_WORKFLOW_ACTION_NAME,
+            dir,
+            REPORT_BRANCH_NAME,
+            str(date.today()),
+        )
+    except Exception as e:
+        logger.warning(f"Error occurred while setting up CI: {str(e)}")
+        logger.warning(
+            "Please set up CI manually using the report-generation.yml file."
+        )
+    return repo
+
+
+def add_report_branch_data(
+    repo: Repository,
+    source_repo_name: str,
+    target_repo_name: str,
+    source_username: str,
+    organization: str,
+    repo_path: str,
+    commit_hash: str,
+):
+    try:
+        # Create the branch
+        subprocess.run(
+            f"git -C {repo_path} pull origin {REPORT_BRANCH_NAME} --rebase",
+            shell=True,
+            check=False,
+        )
+        subprocess.run(
+            f"git -C {repo_path} checkout {REPORT_BRANCH_NAME}", shell=True, check=False
+        )
+
+        copy_template_folder_to(repo_path)
+
+        # Move workflow file to the correct location
+        os.makedirs(f"{repo_path}/.github/workflows", exist_ok=True)
+        try:
+            source = os.path.join(
+                repo_path, REPORT_FOLDER, ".github", "workflows", "main.yml"
+            )
+            destination = os.path.join(repo_path, ".github", "workflows", "main.yml")
+            shutil.move(source, destination)
+        except Exception as e:
+            print(f"Error moving file: {e}")
+
+        update_summary_toml(
+            repo_path,
+            source_username,
+            source_repo_name,
+            organization,
+            target_repo_name,
+            commit_hash,
+        )
+
+        subprocess.run(f"git -C {repo_path} add .", shell=True)
+        subprocess.run(
+            f"git -C {repo_path}  commit -m 'install: {REPORT_FOLDER}'",
+            shell=True,
+            check=False,
+        )
+
+        # Push the changes back to the origin
+        subprocess.run(
+            f"git -C {repo_path} push origin {REPORT_BRANCH_NAME}",
+            shell=True,
+            check=False,
+        )
+
+        print(
+            f"The {REPORT_FOLDER} has been added to {repo.name} on branch {REPORT_BRANCH_NAME}"
+        )
+
+    except GithubException as e:
+        logger.error(f"Error adding subtree: {e}")
+        repo.delete()
+        exit()
+
+    return repo
+
+
+def update_summary_toml(
+    repo_path: str,
+    source_username: str,
+    source_repo_name: str,
+    organization: str,
+    target_repo_name: str,
+    commit_hash: str,
+) -> None:
+    toml_path = f"{repo_path}/{REPORT_FOLDER}/source/summary_information.toml"
+
+    # Read the TOML file
+    with open(toml_path, "rb") as f:  # Note: tomllib requires binary mode
+        summary_data = tomllib.load(f)
+
+    # Update the required fields
+    summary_data["summary"]["project_github"] = (
+        f"https://github.com/{source_username}/{source_repo_name}.git"
+    )
+    summary_data["summary"]["private_github"] = (
+        f"https://github.com/{organization}/{target_repo_name}.git"
+    )
+    summary_data["summary"]["commit_hash"] = commit_hash
+
+    # Write back to the file
+    with open(toml_path, "wb") as f:  # Note: tomli_w requires binary mode
+        tomli_w.dump(summary_data, f)
+
+
+def copy_template_folder_to(destination_folder: str):
+    try:
+        with resources.files("cyaudit") as pkg_path:
+            template_path = pkg_path / "templates"
+        dest = Path(destination_folder)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(template_path, dest, dirs_exist_ok=True)
+        print(f"Successfully copied template to {dest}")
+
+    except Exception as e:
+        print(f"Error copying template folder: {e}")
+
+
+def set_up_ci(repo, subtree_path: str):
+    try:
+        create_action(
+            repo,
+            GITHUB_WORKFLOW_ACTION_NAME,
+            subtree_path,
+            REPORT_BRANCH_NAME,
+            str(date.today()),
+        )
+    except Exception as e:
+        logger.warning(f"Error occurred while setting up CI: {str(e)}")
+        logger.warning(
+            "Please set up CI manually using the report-generation.yml file."
+        )
+
+    return repo
+
+
+def create_report_branch(repo, commit_hash) -> Repository:
+    try:
+        repo.create_git_ref(ref=f"refs/heads/{REPORT_BRANCH_NAME}", sha=commit_hash)
+    except GithubException as e:
+        if e.status == 422:
+            logger.warning(f"Branch {REPORT_BRANCH_NAME} already exists. Skipping...")
+        else:
+            logger.error(f"Error creating branch: {e}")
+            repo.delete()
+            exit()
+    return repo
+
+
+def create_branches_for_auditors(repo, auditors_list, commit_hash) -> Repository:
+    for auditor in auditors_list:
+        branch_name = f"audit/{auditor}"
+        try:
+            repo.create_git_ref(f"refs/heads/{branch_name}", commit_hash)
+        except GithubException as e:
+            if e.status == 422:
+                logger.warning(f"Branch {branch_name} already exists. Skipping...")
+                continue
+            else:
+                logger.error(f"Error creating branch: {e}")
+                repo.delete()
+                exit()
+    return repo
+
+
+def replace_labels_in_repo(repo) -> Repository:
+    repo = delete_default_labels(repo)
+    repo = create_new_labels(repo)
+    return repo
+
+
+def create_new_labels(repo) -> Repository:
+    logger.info("Creating new labels...")
+    for data in SEVERITY_DATA:
+        try:
+            repo.create_label(**data)
+        except Exception:
+            logger.warning(f"Issue creating label with data: {data}. Skipping...")
+    print("Finished creating new labels")
+    return repo
+
+
+def delete_default_labels(repo) -> Repository:
+    logger.info("Deleting default labels...")
+    for label_name in DEFAULT_LABELS:
+        try:
+            label = repo.get_label(label_name)
+            logger.info(f"Deleting {label}...")
+            label.delete()
+        except Exception:
+            logger.warn(f"Label {label} does not exist. Skipping...")
+    logger.info("Finished deleting default labels")
+    return repo
+
+
+def create_audit_tag(repo, repo_path, commit_hash) -> Repository:
+    logger.info("Creating audit tag...")
+
+    try:
+        tag = repo.create_git_tag(
+            tag="cyfrin-audit",
+            message="Cyfrin audit tag",
+            object=commit_hash,
+            type="commit",
+        )
+
+        # Now create a reference to this tag in the repository
+        repo.create_git_ref(ref=f"refs/tags/{tag.tag}", sha=tag.sha)
+    except GithubException as e:
+        logger.error(f"Error creating audit tag: {e}")
+        logger.info("Attempting to create tag manually...")
+
+        try:
+            # Create the tag at the specific commit hash
+            subprocess.run(["git", "-C", repo_path, "tag", "cyfrin-audit", commit_hash])
+
+            # Push the tag to the remote repository
+            subprocess.run(["git", "-C", repo_path, "push", "origin", "cyfrin-audit"])
+        except GithubException as e:
+            logger.error(f"Error creating audit tag manually: {e}")
+            repo.delete()
+            exit()
+    return repo
 
 
 def try_clone_repo(
-    github_token: str,
-    organization: str,
+    target_organization: str,
     target_repo_name: str,
     source_repo_name: str,
     source_username: str,
     repo_path: str,
     commit_hash: str,
+    personal_github_token: str,
+    org_github_token: str | None = None,
 ) -> Repository:
-    github_object = Github(github_token)
-    github_org = github_object.get_organization(organization)
+    if org_github_token is None:
+        org_github_token = personal_github_token
+    org_github_object = Github(org_github_token)
+    github_org = org_github_object.get_organization(target_organization)
     repo = None
     try:
         print(f"Checking whether {target_repo_name} already exists...")
@@ -61,7 +410,7 @@ def try_clone_repo(
             "git",
             "ls-remote",
             "-h",
-            f"https://{github_token}@github.com/{organization}/{target_repo_name}",
+            f"https://{org_github_token}@github.com/{target_organization}/{target_repo_name}",
         ]
 
         result = subprocess.run(
@@ -71,30 +420,32 @@ def try_clone_repo(
             check=True,
         )
         if result.returncode == 0:
-            logger.error(f"{organization}/{target_repo_name} already exists.")
+            logger.error(f"{target_organization}/{target_repo_name} already exists.")
             exit()
         elif result.returncode == 128:
             repo = create_and_clone_repo(
-                github_token,
                 github_org,
-                organization,
+                target_organization,
                 target_repo_name,
                 source_repo_name,
                 source_username,
                 repo_path,
                 commit_hash,
+                personal_github_token,
+                org_github_token=org_github_token,
             )
     except subprocess.CalledProcessError as e:
         if e.returncode == 128:
             repo = create_and_clone_repo(
-                github_token,
                 github_org,
-                organization,
+                target_organization,
                 target_repo_name,
                 source_repo_name,
                 source_username,
                 repo_path,
                 commit_hash,
+                personal_github_token,
+                org_github_token=org_github_token,
             )
         else:
             # Handle other errors or exceptions as needed
@@ -108,7 +459,6 @@ def try_clone_repo(
 
 
 def create_and_clone_repo(
-    github_token: str,
     github_org: Organization,
     organization: str,
     target_repo_name: str,
@@ -116,7 +466,11 @@ def create_and_clone_repo(
     source_username: str,
     repo_path: str,
     commit_hash: str,
+    personal_github_token: str,
+    org_github_token: str | None = None,
 ) -> Repository:
+    if org_github_token is None:
+        org_github_token = personal_github_token
     try:
         repo = github_org.create_repo(target_repo_name, private=True)
     except GithubException as e:
@@ -129,7 +483,7 @@ def create_and_clone_repo(
             [
                 "git",
                 "clone",
-                f"https://{github_token}@github.com/{source_username}/{source_repo_name}.git",
+                f"https://{personal_github_token}@github.com/{source_username}/{source_repo_name}.git",
                 repo_path,
             ],
             check=False,
@@ -206,7 +560,7 @@ def create_and_clone_repo(
                 "remote",
                 "set-url",
                 "origin",
-                f"https://{github_token}@github.com/{organization}/{target_repo_name}.git",
+                f"https://{org_github_token}@github.com/{organization}/{target_repo_name}.git",
             ],
             check=False,
         )
@@ -234,33 +588,109 @@ def create_and_clone_repo(
     return repo
 
 
-def prompt_for_missing(args: Namespace) -> Tuple[str, str, List[str]]:
+def prompt_for_missing(args: Namespace) -> Tuple[str, str, str, List[str], str, str]:
     """Prompt the user for any missing arguments.
 
     Args:
         args (Namespace): The parsed arguments.
 
     Returns:
-        Tuple[str, str, List[str]]: The source repository URL, target repository name, and auditors.
+        Tuple: A tuple containing the source URL, target repo name, target organization, auditors, and commit hash.
     """
     source_url = args.source_url
     target_repo_name = args.target_repo_name
+    target_organization = args.target_organization
     auditors = args.auditors
+    commit_hash = args.commit_hash
+    project_title = args.project_title
+    personal_github_token = args.github_token
+
+    if not personal_github_token:
+        personal_github_token = args.personal_github_token or os.getenv(
+            "CYAUDIT_PERSONAL_GITHUB_TOKEN"
+        )
+
+    org_github_token = args.organization_github_token
+    if not org_github_token:
+        org_github_token = os.getenv("CYAUDIT_ORG_GITHUB_TOKEN")
+        if not org_github_token:
+            org_github_token = personal_github_token
+
+    prompt_counter = 1
+
+    if not project_title:
+        project_title = input(f"{prompt_counter}) Project title:\n")
+        prompt_counter += 1
 
     if source_url is None:
-        source_url = input("1) Source repo url:\n")
+        source_url = input(f"{prompt_counter}) Source repo url:\n")
+        prompt_counter += 1
 
     if target_repo_name is None:
         target_repo_name = input(
-            "2) Target repo name (leave blank to use source repo name):\n"
+            f"{prompt_counter})) Target repo name (leave blank to use source repo name):\n"
         )
         if target_repo_name == "":
             target_repo_name = None
+        prompt_counter += 1
+
+    if target_organization is None:
+        target_organization = input(f"{prompt_counter})) Target organization:\n")
+        prompt_counter += 1
 
     if auditors is None:
-        auditors = input("3) Enter the names of the auditors (separated by spaces):\n")
+        auditors = input(
+            f"{prompt_counter})) Enter the names of the auditors (separated by spaces):\n"
+        )
+        prompt_counter += 1
 
-    return source_url, target_repo_name
+    if commit_hash is None:
+        commit_hash = input(f"{prompt_counter})) Enter the commit hash to audit:\n")
+        prompt_counter += 1
+
+    if personal_github_token is None:
+        personal_github_token = getpass(
+            f"{prompt_counter})) Enter your Personal GitHub token: "
+        )
+        prompt_counter += 1
+
+    if org_github_token is None:
+        org_github_token = getpass(
+            f"{prompt_counter})) Enter your Organization GitHub token (or, leave blank to use your personal GitHub token): "
+        )
+        prompt_counter += 1
+
+    org_github_token = (
+        org_github_token
+        if (org_github_token != "" and org_github_token is not None)
+        else personal_github_token
+    )
+
+    return (
+        source_url,
+        target_repo_name,
+        target_organization,
+        auditors,
+        commit_hash,
+        personal_github_token,
+        org_github_token,
+        project_title,
+    )
+
+
+def add_issue_template_to_repo(repo) -> Repository:
+    # Get the existing finding.md file, if it exists
+    try:
+        finding_file = repo.get_contents(".github/ISSUE_TEMPLATE/finding.md")
+    except GithubException:
+        finding_file = None
+
+    # If finding.md already exists, leave it be. Otherwise, create the file.
+    if finding_file is None:
+        repo.create_file(
+            ".github/ISSUE_TEMPLATE/finding.md", "finding.md", ISSUE_TEMPLATE
+        )
+    return repo
 
 
 if __name__ == "__main__":

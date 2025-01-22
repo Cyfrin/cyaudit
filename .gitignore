@@ -19,3 +19,4 @@ built_docs/
 secrets/
 secret/
 .DS_Store
+.env

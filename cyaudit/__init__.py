@@ -1,4 +1,5 @@
 import sys
+
 from cyaudit import __main__
 
 

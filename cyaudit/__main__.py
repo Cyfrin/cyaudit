@@ -1,8 +1,9 @@
 import argparse
-from importlib import import_module, metadata
 import tomllib
+from importlib import import_module, metadata
 from pathlib import Path
 from typing import Tuple
+
 from cyaudit.logging import logger, set_log_level
 
 CYAUDIT_CLI_VERSION_STRING = "CyAudit CLI v{}"
@@ -82,6 +83,32 @@ def generate_main_parser_and_sub_parsers() -> (
         "--target-organization",
         "-o",
         help="The organization to create the repo in.",
+        type=str,
+    )
+    setup_parser.add_argument(
+        "--commit-hash", "-c", help="The commit hash to checkout in the repo.", type=str
+    )
+
+    token_group = setup_parser.add_mutually_exclusive_group()
+    token_group.add_argument(
+        "--github-token", help="The GitHub token to use for authentication.", type=str
+    )
+    token_group.add_argument(
+        "--personal-github-token",
+        "-p",
+        help="The personal GitHub token to use for authentication.",
+        type=str,
+    )
+    setup_parser.add_argument(
+        "--organization-github-token",
+        "-g",
+        help="The organization GitHub token to use for authentication.",
+        type=str,
+    )
+
+    setup_parser.add_argument(
+        "--project-title",
+        help="The title of the project that you are auditing.",
         type=str,
     )
 

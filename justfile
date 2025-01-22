@@ -16,6 +16,14 @@ format-check:
     uv run ruff check --select I 
     uv run ruff check .
 
+test: 
+    uv run pytest -x --ignore=tests/integration/
+
+test-i: 
+    uv run pytest tests/integration
+
+test-ig:
+    uv run pytest tests/integration_github_fixtures -s
 
 # # Build documentation
 # docs:

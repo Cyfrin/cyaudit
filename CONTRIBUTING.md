@@ -11,16 +11,14 @@ Issues, feedback, and sharing that you're using CyAudit on social media is alway
 - [Table of Contents](#table-of-contents)
 - [Setup](#setup)
   - [Requirements](#requirements)
-    - [ZKync requirements](#zkync-requirements)
   - [Installing for local development](#installing-for-local-development)
   - [Running Tests](#running-tests)
     - [Local Tests](#local-tests)
     - [Integration Tests](#integration-tests)
-    - [ZKync Tests](#zkync-tests)
-    - [Live Tests](#live-tests)
 - [Code Style Guide](#code-style-guide)
   - [Where do you get the `typecheck` and `format` command?](#where-do-you-get-the-typecheck-and-format-command)
 - [Thank you!](#thank-you)
+
 
 # Setup
 
@@ -98,8 +96,22 @@ Run the following:
 ```bash
 just test # Check out the justfile to see the command this runs
 ```
+
 This is equivalent to running `pytest` in the root directory of the project.
 
+### Integration Tests
+
+You'll need to set the following environment variables:
+
+> [!IMPORTANT]  
+> We highly recommend you do not set these environment variables with production repos
+
+- `CYAUDIT_GITHUB_TOKEN` [environment variable](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens). 
+- `CYAUDIT_TEST_ORG`: The name of your organization you want to test this source code of cyaudit on.
+
+```bash
+just test-i
+```
 
 # Code Style Guide
 
