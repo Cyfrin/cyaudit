@@ -1,7 +1,9 @@
-from github import GithubException
+from github import GithubException, Repository
 
 
-def create_action(repo, workflow_name, generator_path, branch_name, datetime):
+def create_action(
+    repo: Repository, workflow_name, generator_path, branch_name, datetime
+):
     try:
         # Define the contents of the workflow file
         workflow_contents = f"""name: {workflow_name}

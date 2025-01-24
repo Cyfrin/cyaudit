@@ -105,17 +105,79 @@ def generate_main_parser_and_sub_parsers() -> (
         help="The organization GitHub token to use for authentication.",
         type=str,
     )
-
     setup_parser.add_argument(
         "--project-title",
         help="The title of the project that you are auditing.",
         type=str,
     )
+    setup_parser.add_argument(
+        "--template-project-id",
+        help="The ID of the template project to use for the audit.",
+        type=str,
+    )
+    setup_parser.add_argument(
+        "--give-users-access",
+        help="Space-separated list of users to give access to the repo.",
+        nargs="+",
+        type=str,
+    )
+    setup_parser.add_argument(
+        "--give-teams-access",
+        help="Space-separated list of teams to give access to the repo.",
+        nargs="+",
+        type=str,
+    )
 
     # ------------------------------------------------------------------
-    #                              CONFIG
+    #                              SOURCE
     # ------------------------------------------------------------------
+    sub_parsers.add_parser(
+        "source", help="Edit the source folder for report generation"
+    )
 
+    # ------------------------------------------------------------------
+    #                              REPORT
+    # ------------------------------------------------------------------
+    sub_parsers.add_parser(
+        "report", help="Edit the source folder for report generation"
+    )
+
+    # ------------------------------------------------------------------
+    #                              CLONE
+    # ------------------------------------------------------------------
+    clone_parser = sub_parsers.add_parser(
+        "clone", help="Clones an audit repo already setup."
+    )
+    clone_parser.add_argument(
+        "target_url",
+        help="The URL of the repo that was are conducting an audit on.",
+        type=str,
+        nargs="?",
+    )
+
+    # ------------------------------------------------------------------
+    #                               INIT
+    # ------------------------------------------------------------------
+    init_parser = sub_parsers.add_parser(
+        "init", help="Create a cyaudit.toml config file."
+    )
+    init_parser.add_argument(
+        "path",
+        help="Path of the new project, defaults to current directory.",
+        type=Path,
+        nargs="?",
+        default=Path("."),
+    )
+    init_parser.add_argument(
+        "--no-global", help="Don't use the global config file.", action="store_false"
+    )
+    init_parser.add_argument(
+        "-f",
+        "--force",
+        required=False,
+        help="Overwrite existing project.",
+        action="store_true",
+    )
     return main_parser, sub_parsers
 
 

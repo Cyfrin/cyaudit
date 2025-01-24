@@ -10,6 +10,7 @@ from importlib import resources
 from pathlib import Path
 from typing import List, Tuple
 from urllib.parse import urlparse
+from cyaudit.config import load_config
 
 import tomli_w
 from github import Github, GithubException, Organization, Repository
@@ -23,7 +24,8 @@ from cyaudit.constants import (
     REPORT_BRANCH_NAME,
     REPORT_FOLDER,
     SEVERITY_DATA,
-    PROJECT_TEMPLATE_ID,
+    TEMPLATE_PROJECT_ID,
+    DEFAULT_REPO_PERMISSION,
 )
 from cyaudit.create_action import create_action
 from cyaudit.logging import logger
@@ -39,7 +41,55 @@ def main(args: Namespace) -> int:
         personal_github_token,
         org_github_token,
         project_title,
-    ) = prompt_for_missing(args)
+        template_project_id,
+        give_users_access,
+        give_teams_access,
+    ) = load_config()
+
+    if args.source_url is not None:
+        source_url = args.source_url
+    if args.target_repo_name is not None:
+        target_repo_name = args.target_repo_name
+    if args.target_organization is not None:
+        target_organization = args.target_organization
+    if args.auditors is not None:
+        auditors = args.auditors
+    if args.commit_hash is not None:
+        commit_hash = args.commit_hash
+    if args.project_title is not None:
+        project_title = args.project_title
+    if args.github_token is not None:
+        personal_github_token = args.github_token
+    if args.organization_github_token is not None:
+        org_github_token = args.organization_github_token
+    if args.template_project_id is not None:
+        template_project_id = args.template_project_id
+    if args.give_users_access is not None:
+        give_users_access = args.give_users_access
+    if args.give_teams_access is not None:
+        give_teams_access = args.give_teams_access
+
+    (
+        source_url,
+        target_repo_name,
+        target_organization,
+        auditors,
+        commit_hash,
+        personal_github_token,
+        org_github_token,
+        project_title,
+        template_project_id,
+    ) = prompt_for_missing(
+        source_url,
+        target_repo_name,
+        target_organization,
+        auditors,
+        commit_hash,
+        project_title,
+        personal_github_token,
+        org_github_token,
+        template_project_id,
+    )
     setup_repo(
         source_url,
         target_repo_name,
@@ -49,6 +99,9 @@ def main(args: Namespace) -> int:
         personal_github_token,
         org_github_token,
         project_title,
+        template_project_id,
+        give_users_access,
+        give_teams_access,
     )
     return 0
 
@@ -62,6 +115,9 @@ def setup_repo(
     personal_github_token: str,
     org_github_token: str | None = None,
     project_title: str = "DEFAULT PROJECT",
+    template_project_id: str = TEMPLATE_PROJECT_ID,
+    give_users_access: List[str] | None = None,
+    give_teams_access: List[str] | None = None,
 ) -> None:
     if not source_url or not auditors or not target_organization:
         raise ValueError(
@@ -113,18 +169,74 @@ def setup_repo(
             temp_dir,
             commit_hash,
         )
-        repo = set_up_ci(repo, temp_dir)
+
+        org_repo = get_org_repo(repo, org_github_token)
+
+        repo = set_up_ci(org_repo, temp_dir)
         set_up_project_board(
-            repo,
-            personal_github_token,
+            org_repo,
             org_github_token,
             target_organization,
             target_repo_name,
-            PROJECT_TEMPLATE_ID,
+            template_project_id,
             project_title,
         )
 
+        org_github_object = Github(org_github_token)
+        g_org = org_github_object.get_organization(target_organization)
+
+        give_access_to_users_and_teams(
+            org_repo, g_org, give_users_access, give_teams_access
+        )
+
     return repo
+
+
+def give_access_to_users_and_teams(
+    repo: Repository.Repository,
+    g_org: Organization,
+    users: List[str] | None,
+    team_names: List[str],
+) -> None:
+    """
+    Give repository access to specified users and teams
+
+    Args:
+        repo: The GitHub repository to give access to
+        organization: The GitHub organization
+        users: List of GitHub usernames to give access to
+        team_names: List of team names to give access to
+    """
+    try:
+        if users:
+            for username in users:
+                try:
+                    repo.add_to_collaborators(username, permission="push")
+                    print(f"✅ Gave access to user: {username}")
+                except Exception as e:
+                    print(f"❌ Failed to give access to user {username}: {e}")
+
+        if team_names:
+            teams = {team.name: team for team in g_org.get_teams()}
+            for team_name in team_names:
+                try:
+                    if team_name not in teams:
+                        print(f"❌ Team not found: {team_name}")
+                        continue
+
+                    team = teams[team_name]
+                    team.update_team_repository(repo, DEFAULT_REPO_PERMISSION)
+                    print(f"✅ Gave access to team: {team_name}")
+                except Exception as e:
+                    print(f"❌ Failed to give access to team {team_name}: {e}")
+
+    except Exception as e:
+        print(f"❌ Error giving access: {e}")
+
+
+def get_org_repo(repo: Repository, org_token: str):
+    g = Github(org_token)
+    return g.get_repo(repo.full_name)
 
 
 # IMPORTANT: project creation via REST API is not supported anymore
@@ -132,21 +244,22 @@ def setup_repo(
 # we use a non-standard way to access GitHub's GraphQL
 def set_up_project_board(
     repo: Repository,
-    github_token: str,
+    org_github_token: str,
     organization: str,
     target_repo_name: str,
-    project_template_id: str,
+    template_project_id: str,
     project_title: str = "DEFAULT PROJECT",
 ):
+    logger.info("Setting up project board...")
     if not project_title:
         project_title = "DEFAULT PROJECT"
     try:
         clone_project(
             repo,
-            github_token,
+            org_github_token,
             organization,
             target_repo_name,
-            project_template_id,
+            template_project_id,
             project_title,
         )
         print("Project board has been set up successfully!")
@@ -156,7 +269,8 @@ def set_up_project_board(
     return
 
 
-def set_up_ci(repo, dir: str):
+def set_up_ci(repo: Repository, dir: str) -> Repository:
+    logger.info("Setting up CI...")
     try:
         create_action(
             repo,
@@ -193,7 +307,7 @@ def add_report_branch_data(
             f"git -C {repo_path} checkout {REPORT_BRANCH_NAME}", shell=True, check=False
         )
 
-        copy_template_folder_to(repo_path)
+        copy_template_folder_to(repo_path + "/" + REPORT_FOLDER)
 
         # Move workflow file to the correct location
         os.makedirs(f"{repo_path}/.github/workflows", exist_ok=True)
@@ -271,36 +385,18 @@ def update_summary_toml(
 
 def copy_template_folder_to(destination_folder: str):
     try:
-        with resources.files("cyaudit") as pkg_path:
-            template_path = pkg_path / "templates"
+        pkg_path = resources.files("cyaudit")
+        template_path = pkg_path / "report_template"
         dest = Path(destination_folder)
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(template_path, dest, dirs_exist_ok=True)
-        print(f"Successfully copied template to {dest}")
 
     except Exception as e:
         print(f"Error copying template folder: {e}")
 
 
-def set_up_ci(repo, subtree_path: str):
-    try:
-        create_action(
-            repo,
-            GITHUB_WORKFLOW_ACTION_NAME,
-            subtree_path,
-            REPORT_BRANCH_NAME,
-            str(date.today()),
-        )
-    except Exception as e:
-        logger.warning(f"Error occurred while setting up CI: {str(e)}")
-        logger.warning(
-            "Please set up CI manually using the report-generation.yml file."
-        )
-
-    return repo
-
-
 def create_report_branch(repo, commit_hash) -> Repository:
+    logger.info("Creating report branch...")
     try:
         repo.create_git_ref(ref=f"refs/heads/{REPORT_BRANCH_NAME}", sha=commit_hash)
     except GithubException as e:
@@ -314,6 +410,7 @@ def create_report_branch(repo, commit_hash) -> Repository:
 
 
 def create_branches_for_auditors(repo, auditors_list, commit_hash) -> Repository:
+    logger.info("Creating auditor branches...")
     for auditor in auditors_list:
         branch_name = f"audit/{auditor}"
         try:
@@ -330,6 +427,7 @@ def create_branches_for_auditors(repo, auditors_list, commit_hash) -> Repository
 
 
 def replace_labels_in_repo(repo) -> Repository:
+    logger.info("Replacing labels...")
     repo = delete_default_labels(repo)
     repo = create_new_labels(repo)
     return repo
@@ -588,7 +686,17 @@ def create_and_clone_repo(
     return repo
 
 
-def prompt_for_missing(args: Namespace) -> Tuple[str, str, str, List[str], str, str]:
+def prompt_for_missing(
+    source_url,
+    target_repo_name,
+    target_organization,
+    auditors,
+    commit_hash,
+    project_title,
+    personal_github_token,
+    org_github_token,
+    template_project_id,
+) -> Tuple[str, str, str, List[str], str, str]:
     """Prompt the user for any missing arguments.
 
     Args:
@@ -597,20 +705,9 @@ def prompt_for_missing(args: Namespace) -> Tuple[str, str, str, List[str], str, 
     Returns:
         Tuple: A tuple containing the source URL, target repo name, target organization, auditors, and commit hash.
     """
-    source_url = args.source_url
-    target_repo_name = args.target_repo_name
-    target_organization = args.target_organization
-    auditors = args.auditors
-    commit_hash = args.commit_hash
-    project_title = args.project_title
-    personal_github_token = args.github_token
-
     if not personal_github_token:
-        personal_github_token = args.personal_github_token or os.getenv(
-            "CYAUDIT_PERSONAL_GITHUB_TOKEN"
-        )
+        personal_github_token = os.getenv("CYAUDIT_PERSONAL_GITHUB_TOKEN")
 
-    org_github_token = args.organization_github_token
     if not org_github_token:
         org_github_token = os.getenv("CYAUDIT_ORG_GITHUB_TOKEN")
         if not org_github_token:
@@ -666,6 +763,12 @@ def prompt_for_missing(args: Namespace) -> Tuple[str, str, str, List[str], str, 
         else personal_github_token
     )
 
+    if template_project_id is None:
+        template_project_id = input(
+            f"{prompt_counter})) Enter the ID of the project template to use:\n"
+        )
+        prompt_counter += 1
+
     return (
         source_url,
         target_repo_name,
@@ -675,6 +778,7 @@ def prompt_for_missing(args: Namespace) -> Tuple[str, str, str, List[str], str, 
         personal_github_token,
         org_github_token,
         project_title,
+        template_project_id,
     )
 
 

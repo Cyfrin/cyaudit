@@ -3,6 +3,8 @@
 # As auditors can be formatted further, their names are in lead_auditors.md and assisting_auditors.md
 project_name = ""
 report_version = 1.0
+team_name = ""
+team_website = "hi.com"
 
 # Team_name engaged with Cyfrin to review project_name
 client_name = ""

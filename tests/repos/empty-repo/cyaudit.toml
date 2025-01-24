@@ -1,0 +1,11 @@
+[cyaudit]
+template_project_id = "5"
+source_url = ""
+target_repo_name = ""
+target_organization = ""
+auditors = []
+commit_hash = ""
+project_title = ""
+
+# personal_github_token = "$CYAUDIT_PERSONAL_GITHUB_TOKEN"
+# org_github_token = "$CYAUDIT_ORG_GITHUB_TOKEN"

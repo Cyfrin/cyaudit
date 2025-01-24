@@ -4,7 +4,7 @@ from gql.transport.requests import RequestsHTTPTransport
 
 
 def get_node_ids(
-    client: Client, organization: str, target_repo_name: str, project_template_id: int
+    client: Client, organization: str, target_repo_name: str, template_project_id: int
 ) -> tuple[str, str, str]:
     query = gql(
         """
@@ -27,7 +27,7 @@ def get_node_ids(
     query_variables = {
         "owner": organization,
         "repo_name": target_repo_name,
-        "project_number": project_template_id,
+        "project_number": template_project_id,
     }
 
     try:
@@ -44,7 +44,7 @@ def get_node_ids(
 
 
 def copy_project(
-    client: Client, owner_node_id: str, project_template_id: str, project_title: str
+    client: Client, owner_node_id: str, template_project_id: str, project_title: str
 ) -> str:
     # GraphQL Mutation for copying a project
     create_project_mutation = gql(
@@ -64,7 +64,7 @@ def copy_project(
     copy_mutation_variables = {
         "input": {
             "ownerId": owner_node_id,
-            "projectId": project_template_id,
+            "projectId": template_project_id,
             "title": project_title,
         }
     }
@@ -167,7 +167,7 @@ def clone_project(
     github_token: str,
     organization: str,
     target_repo_name: str,
-    project_template_id: str,
+    template_project_id: str,
     project_title: str,
 ) -> str:
     """
@@ -176,7 +176,7 @@ def clone_project(
         github_token (str): GitHub personal access token
         organization (str): GitHub organization name
         target_repo_name (str): Name of the repository with which the project will be associated
-        project_template_id (str): ID of the project template, can be extracted from the link (e.g. https://github.com/orgs/Cyfrin/projects/5/views/1 => 5 is the ID)
+        template_project_id (str): ID of the project template, can be extracted from the link (e.g. https://github.com/orgs/Cyfrin/projects/5/views/1 => 5 is the ID)
         project_title (str): Name of the new project.
 
         Return the cloned project's ID, empty string on failure
@@ -192,15 +192,15 @@ def clone_project(
         )
         client = Client(transport=transport, fetch_schema_from_transport=False)
 
-        repo_node_id, org_node_id, project_template_id = get_node_ids(
-            client, organization, target_repo_name, int(project_template_id)
+        repo_node_id, org_node_id, template_project_id = get_node_ids(
+            client, organization, target_repo_name, int(template_project_id)
         )
 
         if not repo_node_id or not org_node_id:
             raise Exception("Failed to get the repository or organization node ID.")
 
         project_node_id = copy_project(
-            client, org_node_id, project_template_id, project_title
+            client, org_node_id, template_project_id, project_title
         )
 
         if not project_node_id:
