@@ -6,7 +6,8 @@ Usage:
 """
 
 from string import Template
-from pandocfilters import toJSONFilter, RawBlock, RawInline
+
+from pandocfilters import RawBlock, toJSONFilter
 
 
 def unpack_code(value, language):

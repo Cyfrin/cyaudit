@@ -2,7 +2,6 @@ import os
 import shutil
 import subprocess
 import tempfile
-import tomllib
 from argparse import Namespace
 from datetime import date
 from getpass import getpass
@@ -10,12 +9,12 @@ from importlib import resources
 from pathlib import Path
 from typing import List, Tuple
 from urllib.parse import urlparse
-from cyaudit.config import load_config
 
 import tomli_w
+import tomllib
 from github import Github, GithubException, Organization, Repository
 
-from cyaudit.github_project_utils import clone_project
+from cyaudit.config import give_access_to_users_and_teams, load_config
 from cyaudit.constants import (
     DEFAULT_LABELS,
     GITHUB_WORKFLOW_ACTION_NAME,
@@ -25,9 +24,9 @@ from cyaudit.constants import (
     REPORT_FOLDER,
     SEVERITY_DATA,
     TEMPLATE_PROJECT_ID,
-    DEFAULT_REPO_PERMISSION,
 )
 from cyaudit.create_action import create_action
+from cyaudit.github_project_utils import clone_project
 from cyaudit.logging import logger
 
 
@@ -119,15 +118,17 @@ def setup_repo(
     give_users_access: List[str] | None = None,
     give_teams_access: List[str] | None = None,
 ) -> None:
-    if not source_url or not auditors or not target_organization:
-        raise ValueError(
-            "Missing required parameters. Please provide:\n"
-            "- Source URL\n"
-            "- Commit hash\n"
-            "- Organization\n"
-            "- Auditors\n"
-            "Either through environment variables or command options."
-        )
+    missing_params = []
+
+    if not source_url:
+        missing_params.append("source_url")
+    if not auditors:
+        missing_params.append("auditors")
+    if not target_organization:
+        missing_params.append("target_organization")
+
+    if missing_params:
+        raise ValueError(f"Missing required parameters: {', '.join(missing_params)}")
 
     if not personal_github_token:
         personal_github_token = os.getenv("CYAUDIT_PERSONAL_GITHUB_TOKEN")
@@ -190,48 +191,6 @@ def setup_repo(
         )
 
     return repo
-
-
-def give_access_to_users_and_teams(
-    repo: Repository.Repository,
-    g_org: Organization,
-    users: List[str] | None,
-    team_names: List[str],
-) -> None:
-    """
-    Give repository access to specified users and teams
-
-    Args:
-        repo: The GitHub repository to give access to
-        organization: The GitHub organization
-        users: List of GitHub usernames to give access to
-        team_names: List of team names to give access to
-    """
-    try:
-        if users:
-            for username in users:
-                try:
-                    repo.add_to_collaborators(username, permission="push")
-                    print(f"✅ Gave access to user: {username}")
-                except Exception as e:
-                    print(f"❌ Failed to give access to user {username}: {e}")
-
-        if team_names:
-            teams = {team.name: team for team in g_org.get_teams()}
-            for team_name in team_names:
-                try:
-                    if team_name not in teams:
-                        print(f"❌ Team not found: {team_name}")
-                        continue
-
-                    team = teams[team_name]
-                    team.update_team_repository(repo, DEFAULT_REPO_PERMISSION)
-                    print(f"✅ Gave access to team: {team_name}")
-                except Exception as e:
-                    print(f"❌ Failed to give access to team {team_name}: {e}")
-
-    except Exception as e:
-        print(f"❌ Error giving access: {e}")
 
 
 def get_org_repo(repo: Repository, org_token: str):
@@ -309,16 +268,17 @@ def add_report_branch_data(
 
         copy_template_folder_to(repo_path + "/" + REPORT_FOLDER)
 
-        # Move workflow file to the correct location
-        os.makedirs(f"{repo_path}/.github/workflows", exist_ok=True)
-        try:
-            source = os.path.join(
-                repo_path, REPORT_FOLDER, ".github", "workflows", "main.yml"
-            )
-            destination = os.path.join(repo_path, ".github", "workflows", "main.yml")
-            shutil.move(source, destination)
-        except Exception as e:
-            print(f"Error moving file: {e}")
+        # I don't think we need this?
+        # # Move workflow file to the correct location
+        # os.makedirs(f"{repo_path}/.github/workflows", exist_ok=True)
+        # try:
+        #     source = os.path.join(
+        #         repo_path, REPORT_FOLDER, ".github", "workflows", "main.yml"
+        #     )
+        #     destination = os.path.join(repo_path, ".github", "workflows", "main.yml")
+        #     shutil.move(source, destination)
+        # except Exception as e:
+        #     print(f"Error moving file: {e}")
 
         update_summary_toml(
             repo_path,
@@ -710,8 +670,6 @@ def prompt_for_missing(
 
     if not org_github_token:
         org_github_token = os.getenv("CYAUDIT_ORG_GITHUB_TOKEN")
-        if not org_github_token:
-            org_github_token = personal_github_token
 
     prompt_counter = 1
 
@@ -735,7 +693,7 @@ def prompt_for_missing(
         target_organization = input(f"{prompt_counter})) Target organization:\n")
         prompt_counter += 1
 
-    if auditors is None:
+    if auditors is None or len(auditors) == 0:
         auditors = input(
             f"{prompt_counter})) Enter the names of the auditors (separated by spaces):\n"
         )

@@ -1,5 +1,6 @@
 import tempfile
 from pathlib import Path
+
 from cyaudit.commands.setup import copy_template_folder_to
 
 

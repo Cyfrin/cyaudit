@@ -1,15 +1,16 @@
-from dateutil.parser import parse
-
-from pathlib import Path
-import tomllib
-from typing import Tuple
-from github import Github, Repository
 import configparser
-from datetime import timedelta
 import math
-from os.path import exists as check_file
 import re
 import subprocess
+from datetime import timedelta
+from os.path import exists as check_file
+from pathlib import Path
+from typing import Tuple
+
+import tomllib
+from dateutil.parser import parse
+from github import Github, Repository
+
 from cyaudit.constants import REPORT_FOLDER
 from cyaudit.logging import logger
 

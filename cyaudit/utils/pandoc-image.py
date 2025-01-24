@@ -6,7 +6,7 @@ Usage:
     pandoc --filter ./pandoc-image.py -o myfile.tex myfile.md
 """
 
-from pandocfilters import toJSONFilter, RawBlock
+from pandocfilters import RawBlock, toJSONFilter
 
 
 def gfm_img_to_captioned_figure(key, value, format, meta):

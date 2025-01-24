@@ -1,4 +1,5 @@
 import pytest
+
 from cyaudit.commands.setup import setup_repo
 from tests.conftest import (
     AUDITORS_LIST,

@@ -1,10 +1,12 @@
-from argparse import Namespace
-from pathlib import Path
 import subprocess
 import sys
+from argparse import Namespace
+from pathlib import Path
+
 import tomli_w
 import tomllib
 from github import Github
+
 from cyaudit.config import load_config
 from cyaudit.constants import REPORT_FOLDER
 from cyaudit.logging import logger

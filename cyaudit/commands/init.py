@@ -1,11 +1,12 @@
 from argparse import Namespace
 from pathlib import Path
-from cyaudit.logging import logger
+
 from cyaudit.constants import (
     CONFIG_FILE_NAME,
     DEFAULT_CYAUDIT_CONFIG,
     GLOBAL_CONFIG_LOCATION,
 )
+from cyaudit.logging import logger
 
 
 def main(args: Namespace) -> int:

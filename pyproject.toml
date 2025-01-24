@@ -3,7 +3,7 @@ name = "cyaudit"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 dependencies = [
     "gql>=3.5.0",
     "pandocfilters>=1.5.1",
@@ -19,24 +19,36 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.13",
 ]
-keywords = ["audit", "github", "cyfrin"]
+keywords = [
+    "audit",
+    "github",
+    "cyfrin",
+]
 
 
 [tool.uv]
-dev-dependencies = ["mypy>=1.14.1", "pytest>=8.3.4", "python-dotenv>=1.0.1"]
+dev-dependencies = [
+    "mypy>=1.14.1",
+    "pytest>=8.3.4",
+    "python-dotenv>=1.0.1",
+]
 
 [project.scripts]
 "cyaudit" = "cyaudit:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = [
+    "hatchling",
+]
 build-backend = "hatchling.build"
 
 [tool.hatch.metadata]
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["cyaudit"]
+packages = [
+    "cyaudit",
+]
 include = [
     "/cyaudit/templates/**/*", # Include template files
 ]

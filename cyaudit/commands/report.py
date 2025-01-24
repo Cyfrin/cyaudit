@@ -1,26 +1,27 @@
-from argparse import Namespace
 import os
+import re
 import shutil
 import subprocess
+from argparse import Namespace
 from importlib.resources import files
+from pathlib import Path
+
 from cyaudit.logging import logger
 from cyaudit.utils.create_report import (
-    get_summary_information,
-    get_severity_counts,
-    calculate_period,
-    get_file_contents,
-    SOURCE_REPORT,
-    lint,
-    save_file_contents,
-    replace_in_file_content,
-    edit_report_md,
-    SOURCE_PATH,
-    WORKING_PATH,
-    TEMPLATE_PATH,
     OUTPUT_PATH,
+    SOURCE_PATH,
+    SOURCE_REPORT,
+    TEMPLATE_PATH,
+    WORKING_PATH,
+    calculate_period,
+    edit_report_md,
+    get_file_contents,
+    get_severity_counts,
+    get_summary_information,
+    lint,
+    replace_in_file_content,
+    save_file_contents,
 )
-import re
-from pathlib import Path
 
 # TODO
 # Tackle https://github.com/Cyfrin/report-generator-template/blob/63946de5f48dbed602bb054876f7384da917a421/scripts/convert.sh
@@ -228,12 +229,36 @@ def generate_report():
     save_file_contents(Path.cwd() / WORKING_PATH / "summary.tex", summary)
     print("Done.\n")
 
+    print("Copying over other files...")
+    files_to_copy = [
+        "main.tex",
+        "risk_classification.tex",
+        "post_report.tex",
+        "pre_report.tex",
+        "risk_classification.tex",
+    ]
+    for file in files_to_copy:
+        src = Path.cwd() / TEMPLATE_PATH / file
+        dst = Path.cwd() / WORKING_PATH / file
+        if src.exists():
+            shutil.copy2(src, dst)
+        else:
+            print(f"Warning: Source file {src} not found")
+
+    src_dir = Path.cwd() / TEMPLATE_PATH / "img"
+    dst_dir = Path.cwd() / WORKING_PATH / "img"
+    if src_dir.exists():
+        shutil.copytree(src_dir, dst_dir, dirs_exist_ok=True)
+
+    print("Done.\n")
+
     # Generate PDF in output folder
     print("Generating report PDF file ...")
     compile_latex_report()
     # Edit the report markdown for Solodit, after everything else is complete
     edit_report_md()
     print("\nAll tasks completed. Report should be in the 'output' folder.")
+    print("\nIf not, please check texput.log for errors.")
 
 
 def process_tex_file(filepath: str = "./working/report.tex") -> None:

@@ -1,10 +1,11 @@
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import tempfile
-from cyaudit.config import load_config
 from argparse import Namespace
+from pathlib import Path
+
+from cyaudit.config import load_config
 
 
 def main(args: Namespace):
@@ -36,7 +37,7 @@ def cyaudit_clone(target_repo: str | None = None):
     if config_file.exists():
         temp_config = tempfile.NamedTemporaryFile(delete=False)
         shutil.copy2(config_file, temp_config.name)
-        config_file.unlink()  # Remove the original file
+        config_file.unlink()
 
     if target_repo is not None:
         target_organization, target_repo = get_org_repo(target_repo)
@@ -44,18 +45,41 @@ def cyaudit_clone(target_repo: str | None = None):
     if org_github_token is None:
         org_github_token = personal_github_token
 
-    # Form the repository URL
-    repo_url = f"https://{org_github_token}@github.com/{target_organization}/{target_repo_name}.git"
+    # Save original credential helper configuration
+    try:
+        original_helper = subprocess.check_output(
+            ["git", "config", "--global", "credential.helper"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except subprocess.CalledProcessError:
+        original_helper = None
+
+    # Form the repository URL without the token
+    repo_url = f"https://github.com/{target_organization}/{target_repo_name}.git"
 
     try:
+        # Set up git credential helper
+        subprocess.run(
+            ["git", "config", "--global", "credential.helper", "store"], check=True
+        )
+
+        # Store the credentials temporarily
+        cred_file = Path.home() / ".git-credentials"
+        with open(cred_file, "a") as f:
+            f.write(f"https://oauth2:{org_github_token}@github.com\n")
+
+        # Clone the repository
         subprocess.run(["git", "clone", repo_url, "."], check=True)
+
+        # Remove the credentials
+        if cred_file.exists():
+            cred_file.unlink()
 
         # Restore the config file if we saved it
         if temp_config:
             shutil.copy2(temp_config.name, config_file)
             os.unlink(temp_config.name)
-
-            # Stage the restored file
             subprocess.run(["git", "add", "cyaudit.toml"])
 
         print(
@@ -64,7 +88,6 @@ def cyaudit_clone(target_repo: str | None = None):
 
     except subprocess.CalledProcessError as e:
         print(f"Error during git operations: {str(e)}")
-        # Restore cyaudit.toml in case of failure
         if temp_config:
             shutil.copy2(temp_config.name, config_file)
             os.unlink(temp_config.name)
@@ -75,6 +98,27 @@ def cyaudit_clone(target_repo: str | None = None):
             shutil.copy2(temp_config.name, config_file)
             os.unlink(temp_config.name)
         raise
+    finally:
+        # Ensure credentials are cleaned up even if an error occurs
+        if (Path.home() / ".git-credentials").exists():
+            (Path.home() / ".git-credentials").unlink()
+
+        # Restore original credential helper if it existed
+        if original_helper is not None:
+            subprocess.run(
+                ["git", "config", "--global", "credential.helper", original_helper],
+                check=True,
+            )
+        else:
+            # If there was no original helper, remove the config entry
+            try:
+                subprocess.run(
+                    ["git", "config", "--global", "--unset-all", "credential.helper"],
+                    check=True,
+                    stderr=subprocess.DEVNULL,
+                )
+            except subprocess.CalledProcessError:
+                pass  # Ignore errors when unsetting
 
 
 def get_org_repo(url: str) -> tuple[str, str]:

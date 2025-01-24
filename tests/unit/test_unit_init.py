@@ -1,8 +1,10 @@
-import pytest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from cyaudit.constants import CONFIG_FILE_NAME, DEFAULT_CYAUDIT_CONFIG
+
+import pytest
+
 from cyaudit.commands.init import create_config
+from cyaudit.constants import CONFIG_FILE_NAME, DEFAULT_CYAUDIT_CONFIG
 
 
 def test_create_config_default(monkeypatch):

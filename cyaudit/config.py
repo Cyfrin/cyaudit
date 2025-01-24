@@ -1,7 +1,11 @@
 import os
 from pathlib import Path
+from typing import List, Tuple
+
 import tomllib
-from typing import Tuple
+from github import Organization, Repository
+
+from cyaudit.constants import DEFAULT_REPO_PERMISSION
 
 
 def load_config() -> Tuple[str, str, str, list[str], str, str, str, str, str]:
@@ -83,3 +87,45 @@ def load_config() -> Tuple[str, str, str, list[str], str, str, str, str, str]:
         give_users_access,
         give_teams_access,
     )
+
+
+def give_access_to_users_and_teams(
+    repo: Repository.Repository,
+    g_org: Organization,
+    users: List[str] | None,
+    team_names: List[str],
+) -> None:
+    """
+    Give repository access to specified users and teams
+
+    Args:
+        repo: The GitHub repository to give access to
+        organization: The GitHub organization
+        users: List of GitHub usernames to give access to
+        team_names: List of team names to give access to
+    """
+    try:
+        if users:
+            for username in users:
+                try:
+                    repo.add_to_collaborators(username, permission="push")
+                    print(f"✅ Gave access to user: {username}")
+                except Exception as e:
+                    print(f"❌ Failed to give access to user {username}: {e}")
+
+        if team_names:
+            teams = {team.name: team for team in g_org.get_teams()}
+            for team_name in team_names:
+                try:
+                    if team_name not in teams:
+                        print(f"❌ Team not found: {team_name}")
+                        continue
+
+                    team = teams[team_name]
+                    team.update_team_repository(repo, DEFAULT_REPO_PERMISSION)
+                    print(f"✅ Gave access to team: {team_name}")
+                except Exception as e:
+                    print(f"❌ Failed to give access to team {team_name}: {e}")
+
+    except Exception as e:
+        print(f"❌ Error giving access: {e}")

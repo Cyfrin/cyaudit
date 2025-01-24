@@ -1,5 +1,5 @@
 from github import Repository
-from gql import gql, Client
+from gql import Client, gql
 from gql.transport.requests import RequestsHTTPTransport
 
 
@@ -105,9 +105,7 @@ def link_project_to_repo(client: Client, project_id: str, repo_node_id: str) -> 
 
     try:
         # Execute the mutation
-        response = client.execute(
-            link_project_mutation, variable_values=link_mutation_variables
-        )
+        client.execute(link_project_mutation, variable_values=link_mutation_variables)
         print(f"Project with id {project_id} has been successfully linked to the repo.")
         return project_id
     except Exception as e:

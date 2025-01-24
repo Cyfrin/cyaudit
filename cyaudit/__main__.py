@@ -1,8 +1,9 @@
 import argparse
-import tomllib
 from importlib import import_module, metadata
 from pathlib import Path
 from typing import Tuple
+
+import tomllib
 
 from cyaudit.logging import logger, set_log_level
 
@@ -32,8 +33,9 @@ def main(argv: list) -> int:
     set_log_level(quiet=args.quiet, debug=args.debug)
 
     if args.command:
-        logger.info(f"Running {args.command} command...")
-        import_module(f"cyaudit.commands.{args.command}").main(args)
+        command_to_use = args.command.replace("-", "_")
+        logger.info(f"Running {command_to_use} command...")
+        import_module(f"cyaudit.commands.{command_to_use}").main(args)
     else:
         main_parser.print_help()
     return 0
@@ -138,8 +140,14 @@ def generate_main_parser_and_sub_parsers() -> (
     # ------------------------------------------------------------------
     #                              REPORT
     # ------------------------------------------------------------------
-    sub_parsers.add_parser(
-        "report", help="Edit the source folder for report generation"
+    sub_parsers.add_parser("report", help="Generate the report.")
+
+    # ------------------------------------------------------------------
+    #                              REPORT
+    # ------------------------------------------------------------------
+    add_team_parser = sub_parsers.add_parser("add-team", help="Add a team.")
+    add_team_parser.add_argument(
+        "team_name", help="The name of the team to add.", type=str
     )
 
     # ------------------------------------------------------------------
